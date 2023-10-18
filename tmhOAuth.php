@@ -7,15 +7,19 @@
  * REST requests. OAuth authentication is sent using an Authorization Header.
  *
  * @author themattharris
- * @version 0.8.5
+ * @version 0.8.4
  *
- * 09 Jun 2017
+ * 06 Aug 2014
  */
 defined('__DIR__') or define('__DIR__', dirname(__FILE__));
 
 class tmhOAuth {
-  const VERSION = '0.8.5';
-  var $response = array();
+
+  const VERSION = '0.8.4';
+  public $response = [];
+  public $config;
+  public $buffer;
+  public $request_settings;
 
   /**
    * Creates a new tmhOAuth object
@@ -23,14 +27,14 @@ class tmhOAuth {
    * @param string $config, the configuration to use for this request
    * @return void
    */
-  public function __construct($config=array()) {
+  public function __construct($config=[]) {
     $this->buffer = null;
     $this->reconfigure($config);
     $this->reset_request_settings();
     $this->set_user_agent();
   }
 
-  public function reconfigure($config=array()) {
+  public function reconfigure($config=[]) {
     // default configuration options
     $this->config = array_merge(
       array(
@@ -44,11 +48,6 @@ class tmhOAuth {
         'consumer_secret'            => '',
         'token'                      => '',
         'secret'                     => '',
-
-        // RSA private key (for RSA-SHA1 and RSA-SHA256 methods)
-        // Please note that this is expected to be a string representing
-        // the PEM-formatted key itself and NOT the file name
-        'private_key_pem'            => '',
 
         // OAuth2 bearer token. This should already be URL encoded
         'bearer'                     => '',
@@ -102,10 +101,10 @@ class tmhOAuth {
     );
   }
 
-  private function reset_request_settings($options=array()) {
+  private function reset_request_settings($options=[]) {
     $this->request_settings = array(
-      'params'    => array(),
-      'headers'   => array(),
+      'params'    => [],
+      'headers'   => [],
       'with_user' => true,
       'multipart' => false,
     );
@@ -218,7 +217,7 @@ class tmhOAuth {
     if ( $oauth_token = $this->token() )
       $defaults['oauth_token'] = $oauth_token;
 
-    $this->request_settings['oauth1_params'] = array();
+    $this->request_settings['oauth1_params'] = [];
 
     // safely encode
     foreach ($defaults as $k => $v) {
@@ -250,7 +249,7 @@ class tmhOAuth {
    */
   public function extract_params($body) {
     $kvs = explode('&', $body);
-    $decoded = array();
+    $decoded = [];
     foreach ($kvs as $kv) {
       $kv = explode('=', $kv, 2);
       $kv[0] = $this->safe_decode($kv[0]);
@@ -332,10 +331,10 @@ class tmhOAuth {
    */
   private function prepare_params() {
     $doing_oauth1 = false;
-    $this->request_settings['prepared_params'] = array();
+    $this->request_settings['prepared_params'] = [];
     $prepared = &$this->request_settings['prepared_params'];
-    $prepared_pairs = array();
-    $prepared_pairs_with_oauth = array();
+    $prepared_pairs = [];
+    $prepared_pairs_with_oauth = [];
 
     if (isset($this->request_settings['oauth1_params'])) {
       $oauth1  = &$this->request_settings['oauth1_params'];
@@ -347,7 +346,7 @@ class tmhOAuth {
       unset($params['oauth_signature']);
 
       // empty the oauth1 array. we reset these values later in this method
-      $oauth1 = array();
+      $oauth1 = [];
     } else {
       $params = $this->request_settings['params'];
     }
@@ -458,58 +457,11 @@ class tmhOAuth {
    * @return void oauth_signature is added to the parameters in the class array variable '$this->request_settings'
    */
   private function prepare_oauth_signature() {
-    switch ($this->config['oauth_signature_method']) {
-      case 'HMAC-SHA1':
-        $signature = $this->sign_with_hmac('sha1');
-        break;
-      case 'HMAC-SHA256':
-        $signature = $this->sign_with_hmac('sha256');
-        break;
-      case 'RSA-SHA1':
-        $signature = $this->sign_with_rsa(OPENSSL_ALGO_SHA1);
-        break;
-      case 'RSA-SHA256':
-        $signature = $this->sign_with_rsa(OPENSSL_ALGO_SHA256);
-        break;
-      default:
-        throw new Exception("Unsupported oauth_signature_method: '" . $this->config['oauth_signature_method'] . "'");
-    }
-    $this->request_settings['oauth1_params']['oauth_signature'] = $this->safe_encode(base64_encode($signature));
-  }
-
-  /**
-   * Signs the OAuth 1 request using HMAC-based signature algorithm
-   *
-   * @param string $algorithm algorithm name (like sha1 or sha256)
-   * @return binary signature
-   */
-  private function sign_with_hmac($algorithm) {
-    return hash_hmac(
-      $algorithm, $this->request_settings['basestring'], $this->request_settings['signing_key'], true
-    );
-  }
-
-  /**
-   * Signs the OAuth 1 request using RSA-based signature algorithm
-   *
-   * @param mixed $algorithm ID or name of hash algorithm that will be
-   * used to compute base string hash before encrypting it with RSA;
-   * values understood by openssl_sign()'s $signature_alg parameter
-   * are accepted here (like 'sha1' or OPENSSL_ALGO_SHA256)
-   * @return binary signature
-   */
-  private function sign_with_rsa($algorithm) {
-    if (!function_exists('openssl_sign')) {
-      throw new Exception("openssl_sign function does not exist. Please make sure Openssl extension is installed");
-    }
-    if ($this->config['private_key_pem'] == '') {
-      throw new Exception("No private key PEM is configured, cannot sign");
-    }
-    $ok = openssl_sign($this->request_settings['basestring'], $signature, $this->config['private_key_pem'], $algorithm);
-    if (!$ok) {
-      throw new Exception("Cannot sign: " . openssl_error_string()); 
-    }
-    return $signature;
+    $this->request_settings['oauth1_params']['oauth_signature'] = $this->safe_encode(
+      base64_encode(
+        hash_hmac(
+          'sha1', $this->request_settings['basestring'], $this->request_settings['signing_key'], true
+    )));
   }
 
   /**
@@ -525,7 +477,7 @@ class tmhOAuth {
     if (isset($this->request_settings['oauth1_params'])) {
       // sort again as oauth_signature was added post param preparation
       uksort($this->request_settings['oauth1_params'], 'strcmp');
-      $encoded_quoted_pairs = array();
+      $encoded_quoted_pairs = [];
       foreach ($this->request_settings['oauth1_params'] as $k => $v) {
         $encoded_quoted_pairs[] = "{$k}=\"{$v}\"";
       }
@@ -563,7 +515,7 @@ class tmhOAuth {
    * @param array $headers any custom headers to send with the request. Default empty array
    * @return int the http response code for the request. 0 is returned if a connection could not be made
    */
-  public function request($method, $url, $params=array(), $useauth=true, $multipart=false, $headers=array()) {
+  public function request($method, $url, $params=[], $useauth=true, $multipart=false, $headers=[]) {
     $options = array(
       'method'    => $method,
       'url'       => $url,
@@ -581,7 +533,7 @@ class tmhOAuth {
     }
   }
 
-  public function apponly_request($options=array()) {
+  public function apponly_request($options=[]) {
     $options = array_merge($this->default_options(), $options, array(
       'with_user' => false,
     ));
@@ -597,7 +549,7 @@ class tmhOAuth {
     }
   }
 
-  public function user_request($options=array()) {
+  public function user_request($options=[]) {
     $options = array_merge($this->default_options(), $options, array(
       'with_user' => true,
     ));
@@ -605,7 +557,7 @@ class tmhOAuth {
     return $this->oauth1_request();
   }
 
-  public function unauthenticated_request($options=array()) {
+  public function unauthenticated_request($options=[]) {
     $options = array_merge($this->default_options(), $options, array(
       'with_user' => false,
     ));
@@ -641,10 +593,10 @@ class tmhOAuth {
   private function default_options() {
     return array(
       'method'         => 'GET',
-      'params'         => array(),
+      'params'         => [],
       'with_user'      => true,
       'multipart'      => false,
-      'headers'        => array(),
+      'headers'        => [],
       'without_bearer' => false,
     );
   }
@@ -662,7 +614,7 @@ class tmhOAuth {
    * @param string $callback the callback function to stream the buffer to.
    * @return void
    */
-  public function streaming_request($method, $url, $params=array(), $callback='') {
+  public function streaming_request($method, $url, $params=[], $callback='') {
     if ( ! empty($callback) ) {
       if ( ! is_callable($callback) ) {
         return false;
@@ -758,7 +710,7 @@ class tmhOAuth {
     list($key, $value) = array_pad(explode(':', $header, 2), 2, null);
 
     $key = trim($key);
-    $value = trim($value ?? '');
+    $value = trim($value ?: '');
 
     if ( ! isset($this->response['headers'][$key])) {
       $this->response['headers'][$key] = $value;
@@ -832,7 +784,7 @@ class tmhOAuth {
     if ($this->request_settings['method'] == 'GET' && isset($this->request_settings['querystring'])) {
       $this->request_settings['url'] = $this->request_settings['url'] . '?' . $this->request_settings['querystring'];
     } elseif ($this->request_settings['method'] == 'POST' || $this->request_settings['method'] == 'PUT') {
-      $postfields = array();
+      $postfields = [];
       if (isset($this->request_settings['postfields']))
         $postfields = $this->request_settings['postfields'];
 
